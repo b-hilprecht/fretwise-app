@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fretwise</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="top">
+    <div class="brand">Fret<span>wise</span></div>
+    <nav class="tabs">
+      <button data-view="song" class="active">Tabs</button>
+      <button data-view="drills">Drills</button>
+    </nav>
+    <select id="songSelect" aria-label="Your tabs"></select>
+    <button id="importBtn">+ Import tab</button>
+  </header>
+
+  <main>
+    <section id="view-song" class="view">
+      <div id="emptyState" class="empty hidden">
+        <h1>Learn the theory inside your tabs</h1>
+        <p>Paste any guitar tab. Fretwise finds its key and chords, writes them as numerals (I, IV, V, vi…) and labels every note, so you see why the tab works, not just where your fingers go.</p>
+        <div class="row">
+          <button id="emptyImport" class="primary">+ Import a tab</button>
+          <button id="emptyExample">Try the example</button>
+        </div>
+      </div>
+
+      <div id="songMain" class="layout hidden">
+        <div class="main-col">
+          <div class="song-head">
+            <div>
+              <h1 id="songTitle"></h1>
+              <div id="songMeta" class="muted-txt"></div>
+            </div>
+            <label class="key-pick">Key <select id="keySelect"></select></label>
+          </div>
+
+          <button id="toggleChords" class="link-btn">▸ Chord overview</button>
+          <div id="progression" class="progression hidden"></div>
+
+          <div class="tab-head">
+            <label><input type="checkbox" id="showTab" checked> Show tab</label>
+            <span class="muted-txt">Colors = scale degrees. Filled = in the chord, dashed = melody/passing note. Hover a note to see what it is, click to hear it.</span>
+          </div>
+          <div id="tab" class="tab-wrap"></div>
+
+          <div id="nowPlaying" class="now-playing"></div>
+          <div class="fb-wrap"><svg id="fretboard" role="img" aria-label="Fretboard"></svg></div>
+
+          <div class="fb-controls">
+            <div class="seg">
+              <span class="seg-label">Labels</span>
+              <button data-label="interval">Chord tones</button>
+              <button data-label="degree">Key degrees</button>
+              <button data-label="note">Notes</button>
+              <button data-label="none">None</button>
+            </div>
+            <label><input type="checkbox" id="showTones"> chord tones on whole neck</label>
+            <label><input type="checkbox" id="showScale"> key scale</label>
+            <div class="legend" title="Colors follow the circle of fifths, warm to cold. In a major key the warm ones are the major chords (IV I V), the cool ones the minor chords (ii vi iii), and the coldest is vii°.">
+              <span class="sw deg-4">4</span><span class="sw deg-1">1</span><span class="sw deg-5">5</span>
+              <span class="sw deg-2">2</span><span class="sw deg-6">6</span><span class="sw deg-3">3</span>
+              <span class="sw deg-7">7</span><span class="sw out deg-out">·</span>
+              <span class="lg-note">scale degrees, warm → cold along the circle of fifths · grey = outside the key</span>
+            </div>
+          </div>
+          <p class="tip">Click a chord to hear it. ⇄ corrects it. Click any fret to hear that note.</p>
+        </div>
+
+        <aside class="side-col">
+          <div class="card" id="importCard">
+            <h3>Key &amp; chords</h3>
+            <div id="importInfo"></div>
+          </div>
+          <div class="card">
+            <h3>Chords in <span id="keyName"></span></h3>
+            <div id="diatonic" class="diatonic"></div>
+            <div id="diatonicHint" class="hint"></div>
+          </div>
+          <div class="card">
+            <h3>Why it works</h3>
+            <div id="concepts"></div>
+          </div>
+          <div class="card">
+            <h3>Try this</h3>
+            <ul id="challenges" class="challenges"></ul>
+          </div>
+        </aside>
+      </div>
+    </section>
+
+    <section id="view-drills" class="view hidden">
+      <p class="drill-key">Drilling in <b id="drillKey"></b>. Switch tabs or keys in the Tabs view.</p>
+      <div class="drill-grid">
+        <div class="card drill">
+          <h3>Ear: which chord?</h3>
+          <p class="hint">You'll hear the home chord, then a mystery chord. Name the mystery chord's numeral.</p>
+          <div class="row">
+            <button id="earNew" class="primary">▶ New question</button>
+            <button id="earRepeat">↻ Repeat</button>
+            <label id="earSongOnlyWrap"><input type="checkbox" id="earSongOnly" checked> only this tab's chords</label>
+          </div>
+          <div id="earOptions" class="options"></div>
+          <div id="earFeedback" class="feedback"></div>
+          <div id="earScore" class="score"></div>
+        </div>
+
+        <div class="card drill">
+          <h3>Numerals: name it</h3>
+          <p class="hint">Random keys. Learn which chord sits on which step of the scale.</p>
+          <div id="numQ" class="question"></div>
+          <div id="numOptions" class="options"></div>
+          <div id="numFeedback" class="feedback"></div>
+          <div class="row"><button id="numSkip">Skip</button><span id="numScore" class="score"></span></div>
+        </div>
+
+        <div class="card drill wide">
+          <h3>Fretboard: find every <span id="findTarget" class="target">?</span></h3>
+          <p class="hint">Click every one between frets 0 and 12. Notes come from the tab's key.</p>
+          <div class="row"><button id="findNew" class="primary">▶ New note</button><span id="findStatus"></span></div>
+          <div class="fb-wrap"><svg id="drillBoard" role="img" aria-label="Fretboard drill"></svg></div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <div id="popover" class="popover hidden"></div>
+  <div id="noteTip" class="note-tip hidden"></div>
+
+  <div id="importModal" class="modal hidden">
+    <div class="modal-box">
+      <h2>Import a tab</h2>
+      <div class="grab">
+        <div>
+          <b>From a tab website:</b> drag this button to your bookmarks bar once →
+          <a id="bmLink" class="bm-link" title="Drag me to your bookmarks bar">→ Fretwise</a>
+        </div>
+        <ol>
+          <li>Open a tab page (any site) and click <b>→ Fretwise</b> in your bookmarks bar. It copies the tab.</li>
+          <li>Come back here and click <b>Paste</b>.</li>
+        </ol>
+      </div>
+      <p class="hint">Or paste a normal 6-line ASCII tab (<code>e|---0---|</code>) yourself. If there's a line of chord names right above the tab lines, those chords are used. Otherwise the app guesses them from the notes. Rhythm is ignored.</p>
+      <label class="field">Title <input id="impTitle" placeholder="e.g. Blackbird intro"> <button id="impPaste" class="primary">Paste</button></label>
+      <textarea id="impText" spellcheck="false" placeholder="e|-----0-----|&#10;B|---1---1---|&#10;G|-2-------2-|&#10;D|-----------|&#10;A|3----------|&#10;E|-----------|"></textarea>
+      <div id="impError" class="error"></div>
+      <div class="row">
+        <button id="impExample">Load example</button>
+        <span class="spacer"></span>
+        <button id="impCancel">Cancel</button>
+        <button id="impGo" class="primary">Import &amp; save</button>
+      </div>
+      <div class="backup">
+        Imported tabs are saved in this browser.
+        <button id="libExport">Export all (.json)</button>
+        <label class="btn">Restore from file <input type="file" id="libImport" accept=".json,application/json" hidden></label>
+      </div>
+    </div>
+  </div>
+
+  <script src="js/theory.js"></script>
+  <script src="js/importer.js"></script>
+  <script src="js/bookmarklet.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/fretboard.js"></script>
+  <script src="js/tab.js"></script>
+  <script src="js/drills.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
