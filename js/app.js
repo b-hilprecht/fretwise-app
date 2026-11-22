@@ -24,13 +24,7 @@ function loadSong(song) {
   state.current = 0;
   state.picked = null;
   if (song) {
-    // Tabs imported before sections existed: recover section info from the raw text.
-    if (!song.blocks && song.raw) {
-      try {
-        const re = Importer.parse(song.raw, song.title);
-        if (re.bars.length === song.bars.length) { song.blocks = re.blocks; Library.save(song); }
-      } catch (e) { /* keep it as one part */ }
-    }
+    upgradeSong(song);
     state.key = { ...song.key };
     rebuild();
     try { localStorage.setItem('fretwise:last', song.id); } catch (e) { /* ignore */ }
@@ -41,6 +35,31 @@ function loadSong(song) {
     Tab.render();
   }
   renderAll();
+}
+
+// Tabs saved by older versions: re-read the stored raw text to add what's new
+// (v1: section info; v2: full chord names like Gadd9, Asus2, G/B). Hand-corrected
+// chords are kept.
+const SONG_VERSION = 2;
+function upgradeSong(song) {
+  if ((song.version || 0) >= SONG_VERSION || !song.raw) return;
+  try {
+    const re = Importer.parse(song.raw, song.title);
+    if (re.bars.length === song.bars.length) {
+      if (!song.blocks) song.blocks = re.blocks;
+      const sameLayout = re.segs.length === song.segs.length &&
+        re.segs.every((s, i) => s.bar === song.segs[i].bar && s.from === song.segs[i].from && s.to === song.segs[i].to);
+      if (sameLayout) {
+        song.segs.forEach((s, i) => {
+          const corrected = !Theory.sameChord(s.chord, s.guess);
+          s.guess = { ...re.segs[i].guess };
+          if (!corrected) s.chord = { ...re.segs[i].chord };
+        });
+      }
+    }
+  } catch (e) { /* keep the song as it is */ }
+  song.version = SONG_VERSION;
+  Library.save(song);
 }
 
 // Builds chords + tab columns from the stored tab, transposed to state.key.
@@ -57,12 +76,16 @@ function rebuild() {
   state.chords = [];
   state.cols = [];
   song.segs.forEach((sg, i) => {
-    const chord = { ...sg.chord, root: Theory.mod(sg.chord.root + delta) };
+    const chord = {
+      ...sg.chord,
+      root: Theory.mod(sg.chord.root + delta),
+      bass: sg.chord.bass == null ? null : Theory.mod(sg.chord.bass + delta),
+    };
     const evs = song.bars[sg.bar].events.slice(sg.from, sg.to);
     state.chords.push({
       num: Theory.numeralFor(chord, state.key), bar: sg.bar, chord,
       voicing: voicingFromNotes(evs.flatMap((e) => e.notes.map(shift))),
-      changed: sg.chord.root !== sg.guess.root || sg.chord.quality !== sg.guess.quality || sg.chord.seventh !== sg.guess.seventh,
+      changed: !Theory.sameChord(sg.chord, sg.guess),
     });
     const firstInBar = i === 0 || song.segs[i - 1].bar !== sg.bar;
     // f = position inside the bar in the original tab (0..1), used for spacing
@@ -226,8 +249,9 @@ function renderSide() {
 function renderDiatonic() {
   const el = $('#diatonic');
   el.innerHTML = '';
-  const used = new Set(state.chords.map((c) => c.num));
-  const cur = state.chords[state.current].num;
+  // compare plain triads: Gadd9 and G/B both count as "I is used"
+  const used = new Set(state.chords.map((c) => Theory.baseNumeral(c.chord, state.key)));
+  const cur = Theory.baseNumeral(state.chords[state.current].chord, state.key);
   for (const num of Theory.diatonic(state.key)) {
     const ch = Theory.chordFromNumeral(num, state.key);
     const b = document.createElement('button');
@@ -282,9 +306,11 @@ function renderImportCard() {
 
 function insights() {
   const nums = [...new Set(state.chords.map((c) => c.num))];
-  const dia = new Set(Theory.diatonic(state.key));
-  const outside = nums.filter((n) => !dia.has(n.replace(/7$/, '')));
   const scale = Theory.scalePcs(state.key);
+  // outside the key = the chord has a note that isn't in the scale (E7 in A minor: G♯)
+  const outside = [...new Set(state.chords
+    .filter((c) => Theory.chordIntervals(c.chord).some((i) => !scale.has(Theory.mod(c.chord.root + i))))
+    .map((c) => c.num))];
   let total = 0, tones = 0, inScale = 0;
   for (const col of state.cols) {
     const ch = state.chords[col.seg].chord;
@@ -320,7 +346,7 @@ function openSwap(card, i) {
     b.className = 'pop-opt' + (num === state.chords[i].num ? ' current' : '');
     b.innerHTML = `<b class="${Theory.degreeClass(ch.root, state.key)}">${num}</b> ${Theory.chordName(ch, state.key)}`;
     b.onclick = () => {
-      state.song.segs[i].chord = { root: Theory.mod(ch.root - state.delta), quality: ch.quality, seventh: ch.seventh };
+      state.song.segs[i].chord = { root: Theory.mod(ch.root - state.delta), quality: ch.quality, seventh: ch.seventh, add: [], bass: null };
       Library.save(state.song);
       state.current = i;
       rebuild();

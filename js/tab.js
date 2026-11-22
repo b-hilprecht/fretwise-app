@@ -10,7 +10,6 @@ const Tab = (() => {
   const NS = 'http://www.w3.org/2000/svg';
   const LEFT = 26, HEAD = 34, GAP = 26, MIN_COL = 23, PAD = 6;
   const STRING_NAMES = ['E', 'A', 'D', 'G', 'B', 'e'];
-  const ROLE = { R: 'root', '♭3': '♭3rd', 3: '3rd', '♭5': '♭5th', 5: '5th', 6: '6th', '♭7': '♭7th', 7: '7th' };
   let playhead = null;
 
   const el = (tag, attrs, parent) => {
@@ -57,7 +56,7 @@ const Tab = (() => {
     const inChord = Theory.chordIntervals(chord).includes(Theory.mod(pc - chord.root));
     const name = Theory.chordName(chord, state.key);
     return `<b>${Theory.noteName(pc, state.key)}</b> · ${d ? `degree <b>${d}</b>` : 'outside the key'} · ` +
-      (inChord ? `${ROLE[iv] || iv} of ${name}` : `passing note over ${name}`);
+      (inChord ? `${Theory.roleName(pc - chord.root, chord)} of ${name}` : `passing note over ${name}`);
   }
 
   function renderRow(wrap, rowBars, barW, bpr) {

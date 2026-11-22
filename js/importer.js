@@ -19,7 +19,7 @@ const Importer = (() => {
     { quality: 'dim', seventh: '' },
   ];
   const LABEL = /^\s*(?:[eEBGDAbgda][#b]?)?\s*[|:]?/;
-  const CHORD_TOKEN = /^[A-G][#b♯♭]?(maj|min|m|dim|aug|sus|add|M|°|\+|Δ|\d|\(|\))*(\/[A-G][#b♯♭]?)?$/;
+  const CHORD_TOKEN = /^[A-G][#b♯♭]?(maj|min|m|dim|aug|sus|add|M|°|ø|\+|-|Δ|[b#♯♭](?=\d)|\d|\(|\))*(\/[A-G][#b♯♭]?)?$/;
 
   // ---------- parsing ----------
   function isTabLine(line) {
@@ -136,7 +136,7 @@ const Importer = (() => {
     return best;
   }
 
-  const same = (a, b) => a && b && a.root === b.root && a.quality === b.quality && a.seventh === b.seventh;
+  const same = (a, b) => Theory.sameChord(a, b);
 
   function guessSegs(bars, key) {
     const segs = [];
@@ -285,7 +285,7 @@ const Importer = (() => {
 
     return {
       id: 'tab-' + Date.now().toString(36),
-      title, imported: true, created: new Date().toISOString(),
+      title, imported: true, version: 2, created: new Date().toISOString(),
       key, keyAlternatives: keys.slice(0, 4).map((k) => k.key),
       chordSource: validHints.length ? 'names' : 'guessed',
       bars, segs, blocks, raw: text,

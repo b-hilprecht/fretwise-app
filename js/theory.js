@@ -55,16 +55,44 @@ const Theory = (() => {
     };
   }
 
+  // A chord: { root, quality, seventh, add, bass }
+  //   quality: maj | min | dim | aug | sus2 | sus4 | hdim (m7♭5) | five (power chord)
+  //   seventh: '' | '7' | 'maj7'      add: extra intervals (2 = 9th, 5 = 11th, 9 = 6th)
+  //   bass: pitch class of a slash bass (G/B), or null
+  const BASE = {
+    maj: [0, 4, 7], min: [0, 3, 7], dim: [0, 3, 6], aug: [0, 4, 8],
+    sus2: [0, 2, 7], sus4: [0, 5, 7], hdim: [0, 3, 6, 10], five: [0, 7],
+  };
+
   function chordIntervals(ch) {
-    const iv = ch.quality === 'maj' ? [0, 4, 7] : ch.quality === 'min' ? [0, 3, 7] : [0, 3, 6];
+    const iv = [...(BASE[ch.quality] || BASE.maj)];
     if (ch.seventh === '7') iv.push(ch.quality === 'dim' ? 9 : 10);
     if (ch.seventh === 'maj7') iv.push(11);
+    for (const a of ch.add || []) if (!iv.includes(a)) iv.push(a);
     return iv;
   }
 
+  // Text after the root: "m", "7", "maj9", "add9", "7sus4", "m7♭5", "6", "5" …
+  // For numerals (withQuality = false) the case of the numeral already says minor.
+  function chordSuffix(ch, withQuality) {
+    const add = ch.add || [];
+    const has9 = add.includes(2), has11 = add.includes(5), has6 = add.includes(9);
+    if (ch.quality === 'hdim') return withQuality ? 'm7♭5' : 'ø7';
+    if (ch.quality === 'five') return '5';
+    let s = (withQuality ? { min: 'm', dim: '°', aug: '+' } : { dim: '°', aug: '+' })[ch.quality] || '';
+    if (has6) s += '6';
+    if (ch.seventh) s += (ch.seventh === 'maj7' ? 'maj' : '') + (has9 ? '9' : '7');
+    if (ch.quality === 'sus2' || ch.quality === 'sus4') s += ch.quality;
+    const adds = [];
+    if (has9 && !ch.seventh) adds.push('add9');
+    if (has11) adds.push('add11');
+    if (adds.length) s += withQuality ? adds.join('') : `(${adds.join(',')})`;
+    return s;
+  }
+
+  const hasBass = (ch) => ch.bass != null && mod(ch.bass) !== mod(ch.root);
+
   function chordName(ch, key) {
-    const q = { maj: '', min: 'm', dim: '°' }[ch.quality];
-    const s = ch.seventh === '7' ? '7' : ch.seventh === 'maj7' ? 'maj7' : '';
     // Chords outside the key follow their numeral: ♭VII in C is B♭, not A♯.
     let names = usesFlats(key) ? FLAT : SHARP;
     if (key) {
@@ -72,10 +100,36 @@ const Theory = (() => {
       if (acc === '♭') names = FLAT;
       else if (acc === '♯') names = SHARP;
     }
-    return names[mod(ch.root)] + q + s;
+    return names[mod(ch.root)] + chordSuffix(ch, true) + (hasBass(ch) ? '/' + names[mod(ch.bass)] : '');
   }
 
-  const qualityWord = (ch) => ({ maj: 'major', min: 'minor', dim: 'diminished' }[ch.quality]);
+  const sameChord = (a, b) => !!a && !!b && a.root === b.root && a.quality === b.quality &&
+    (a.seventh || '') === (b.seventh || '') &&
+    JSON.stringify([...(a.add || [])].sort()) === JSON.stringify([...(b.add || [])].sort()) &&
+    (a.bass ?? null) === (b.bass ?? null);
+
+  // Role of an interval inside a chord, for hover text: "root", "3rd", "9th", "4th (sus4)" …
+  function roleName(iv, ch) {
+    switch (mod(iv)) {
+      case 0: return 'root';
+      case 1: return '♭9th';
+      case 2: return ch.quality === 'sus2' ? '2nd (sus2)' : '9th';
+      case 3: return '♭3rd';
+      case 4: return '3rd';
+      case 5: return ch.quality === 'sus4' ? '4th (sus4)' : '11th';
+      case 6: return '♭5th';
+      case 7: return '5th';
+      case 8: return ch.quality === 'aug' ? '♯5th' : '♭6th';
+      case 9: return ch.quality === 'dim' && ch.seventh ? '°7th' : '6th';
+      case 10: return '♭7th';
+      default: return '7th';
+    }
+  }
+
+  const qualityWord = (ch) => ({
+    maj: 'major', min: 'minor', dim: 'diminished', aug: 'augmented', sus2: 'suspended 2nd',
+    sus4: 'suspended 4th', hdim: 'half-diminished', five: 'power chord',
+  }[ch.quality] || 'major');
 
   const diatonic = (key) =>
     key.mode === 'major'
@@ -104,11 +158,13 @@ const Theory = (() => {
     D: { rootString: 2, maj: [null, null, 0, 2, 3, 2], min: [null, null, 0, 2, 3, 1], '7': [null, null, 0, 2, 1, 2], m7: [null, null, 0, 2, 1, 1], maj7: [null, null, 0, 2, 2, 2], dim: [null, null, 0, 1, 3, 1] },
   };
 
+  // Shapes exist for plain chords; sus/add/aug/power chords fall back to the nearest one.
   function shapeType(ch) {
-    if (ch.quality === 'dim') return 'dim';
-    if (ch.seventh === '7') return ch.quality === 'min' ? 'm7' : '7';
+    if (ch.quality === 'dim' || ch.quality === 'hdim') return 'dim';
+    const q = ch.quality === 'min' ? 'min' : 'maj';
+    if (ch.seventh === '7') return q === 'min' ? 'm7' : '7';
     if (ch.seventh === 'maj7') return 'maj7';
-    return ch.quality;
+    return q;
   }
 
   function makeVoicing(frets, ch, label, shape, rootFret) {
@@ -161,26 +217,54 @@ const Theory = (() => {
       }
     }
     let r = ROMAN[d];
-    if (ch.quality !== 'maj') r = r.toLowerCase();
-    return acc + r + (ch.quality === 'dim' ? '°' : '') + (ch.seventh || '');
+    if (['min', 'dim', 'hdim'].includes(ch.quality)) r = r.toLowerCase();
+    // slash bass as the degree it sits on: G/B in G → I/3
+    return acc + r + chordSuffix(ch, false) + (hasBass(ch) ? '/' + DEGREE[mod(ch.bass - key.tonic)] : '');
   }
 
-  // "F#m7", "Bb", "Dsus4", "G/B" -> { root, quality, seventh } (extensions simplified).
+  // Numeral of the plain triad (I, ♭VII, vi…): for comparing with the key's chords.
+  const baseNumeral = (ch, key) => numeralFor({
+    root: ch.root, quality: ch.quality === 'min' ? 'min' : ['dim', 'hdim'].includes(ch.quality) ? 'dim' : 'maj',
+  }, key);
+
+  // "F#m7", "Bb", "Gadd9", "Em(add9)", "D7sus4", "Cmaj9", "Bm7b5", "C5", "G/B" -> chord.
   const LETTER = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+  const accOf = (a) => (/[#♯]/.test(a) ? 1 : /[b♭]/.test(a) ? -1 : 0);
   function parseChordName(name) {
-    const m = name.match(/^([A-G])([#♯b♭]?)([^/]*)/);
+    const m = name.match(/^([A-G])([#♯b♭]?)([^/]*)(?:\/([A-G])([#♯b♭]?))?/);
     if (!m) return null;
-    const root = mod(LETTER[m[1]] + (/[#♯]/.test(m[2]) ? 1 : /[b♭]/.test(m[2]) ? -1 : 0));
-    const rest = m[3];
-    const quality = /^(dim|°|o)/.test(rest) ? 'dim' : /^(m(?!aj)|min|-)/.test(rest) ? 'min' : 'maj';
-    const seventh = /maj7|M7|Δ/.test(rest) ? 'maj7' : /7/.test(rest) ? '7' : '';
-    return { root, quality, seventh };
+    const root = mod(LETTER[m[1]] + accOf(m[2]));
+    const bass = m[4] ? mod(LETTER[m[4]] + accOf(m[5])) : null;
+    const rest = m[3].replace(/[()]/g, '');
+    if (/^(m7b5|m7♭5|ø)/.test(rest)) return { root, quality: 'hdim', seventh: '', add: [], bass };
+    if (/^5$/.test(rest)) return { root, quality: 'five', seventh: '', add: [], bass };
+
+    let quality = 'maj';
+    if (/^(dim|°|o)/.test(rest)) quality = 'dim';
+    else if (/^(aug|\+)/.test(rest)) quality = 'aug';
+    else if (/^(m(?!aj)|min|-)/.test(rest)) quality = 'min';
+    if (/sus2/.test(rest)) quality = 'sus2';
+    else if (/sus4?/.test(rest)) quality = 'sus4';
+
+    const add = [];
+    for (const a of rest.match(/add\d+/g) || []) {
+      const n = +a.slice(3);
+      if (n === 9 || n === 2) add.push(2);
+      else if (n === 11 || n === 4) add.push(5);
+      else if (n === 13 || n === 6) add.push(9);
+    }
+    const core = rest.replace(/sus[24]?/g, '').replace(/add\d+/g, '');
+    const seventh = /maj(7|9|11|13)|M(7|9)|Δ/.test(core) ? 'maj7' : /7|9|11|13/.test(core) ? '7' : '';
+    if (/9|11|13/.test(core)) add.push(2);  // 9/11/13 chords include the 9th
+    if (/11/.test(core)) add.push(5);
+    if (/(^|[^1])6/.test(core)) add.push(9); // C6, Am6 (not the 3 of 13)
+    return { root, quality, seventh, add: [...new Set(add)], bass };
   }
 
   return {
     SCALES, DEGREE, INTERVAL, OPEN_MIDI, mod,
-    noteName, keyName, scalePcs, degreeOf, degreeClass, numeralFor, parseChordName,
-    chordFromNumeral, chordIntervals, chordName, qualityWord,
+    noteName, keyName, scalePcs, degreeOf, degreeClass, numeralFor, baseNumeral, parseChordName,
+    chordFromNumeral, chordIntervals, chordName, sameChord, roleName, qualityWord,
     diatonic, borrowed, chooseVoicing,
   };
 })();

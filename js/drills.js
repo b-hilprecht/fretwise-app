@@ -13,7 +13,8 @@ const Drills = (() => {
   function earNew() {
     const key = state.key;
     const fromTab = $('#earSongOnly').checked && state.chords.length;
-    let opts = fromTab ? [...new Set(state.chords.map((c) => c.num))] : Theory.diatonic(key);
+    // plain triad numerals (Gadd9 → I), so every option can be played and named
+    let opts = fromTab ? [...new Set(state.chords.map((c) => Theory.baseNumeral(c.chord, key)))] : Theory.diatonic(key);
     if (!opts.includes(tonicNum(key))) opts = [tonicNum(key), ...opts];
     let ans;
     do { ans = pick(opts); } while (opts.length > 1 && ans === ear.answer);
