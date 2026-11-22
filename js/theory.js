@@ -75,17 +75,27 @@ const Theory = (() => {
   // Text after the root: "m", "7", "maj9", "add9", "7sus4", "m7♭5", "6", "5" …
   // For numerals (withQuality = false) the case of the numeral already says minor.
   function chordSuffix(ch, withQuality) {
-    const add = ch.add || [];
-    const has9 = add.includes(2), has11 = add.includes(5), has6 = add.includes(9);
+    const has = (i) => (ch.add || []).includes(i);
     if (ch.quality === 'hdim') return withQuality ? 'm7♭5' : 'ø7';
     if (ch.quality === 'five') return '5';
     let s = (withQuality ? { min: 'm', dim: '°', aug: '+' } : { dim: '°', aug: '+' })[ch.quality] || '';
-    if (has6) s += '6';
-    if (ch.seventh) s += (ch.seventh === 'maj7' ? 'maj' : '') + (has9 ? '9' : '7');
+    if (ch.seventh) {
+      // the highest stacked tone names the chord: 7 → 9 → 11 → 13
+      const top = has(9) ? '13' : has(5) ? '11' : has(2) ? '9' : '7';
+      const maj = ch.seventh === 'maj7' ? 'maj' : '';
+      s += ch.quality === 'min' && maj && withQuality ? `(maj${top})` : maj + top;
+    } else if (has(9)) {
+      s += has(2) ? '6/9' : '6';
+    }
     if (ch.quality === 'sus2' || ch.quality === 'sus4') s += ch.quality;
+    // altered tones
+    if (has(1)) s += '♭9';
+    if (has(3) && !['min', 'dim', 'hdim'].includes(ch.quality)) s += '♯9';
+    if (has(6) && !['dim', 'hdim'].includes(ch.quality)) s += '♯11';
+    if (has(8) && ch.quality !== 'aug') s += '♭13';
     const adds = [];
-    if (has9 && !ch.seventh) adds.push('add9');
-    if (has11) adds.push('add11');
+    if (has(2) && !ch.seventh && !has(9)) adds.push('add9');
+    if (has(5) && !ch.seventh) adds.push('add11');
     if (adds.length) s += withQuality ? adds.join('') : `(${adds.join(',')})`;
     return s;
   }
@@ -114,10 +124,10 @@ const Theory = (() => {
       case 0: return 'root';
       case 1: return '♭9th';
       case 2: return ch.quality === 'sus2' ? '2nd (sus2)' : '9th';
-      case 3: return '♭3rd';
+      case 3: return (ch.add || []).includes(3) && !['min', 'dim', 'hdim'].includes(ch.quality) ? '♯9th' : '♭3rd';
       case 4: return '3rd';
       case 5: return ch.quality === 'sus4' ? '4th (sus4)' : '11th';
-      case 6: return '♭5th';
+      case 6: return (ch.add || []).includes(6) && !['dim', 'hdim'].includes(ch.quality) ? '♯11th' : '♭5th';
       case 7: return '5th';
       case 8: return ch.quality === 'aug' ? '♯5th' : '♭6th';
       case 9: return ch.quality === 'dim' && ch.seventh ? '°7th' : '6th';
@@ -210,7 +220,9 @@ const Theory = (() => {
     let d = sc.indexOf(iv);
     let acc = '';
     if (d < 0) {
-      const order = key.mode === 'minor' && iv !== 1 && iv !== 6 ? ['♯', '♭'] : ['♭', '♯'];
+      // passing diminished chords lean up (C♯° in C = ♯i°); minor keys raise 3/6/7
+      const dimLike = ch.quality === 'dim' || ch.quality === 'hdim';
+      const order = dimLike || (key.mode === 'minor' && iv !== 1 && iv !== 6) ? ['♯', '♭'] : ['♭', '♯'];
       for (const a of order) {
         d = sc.indexOf(mod(a === '♭' ? iv + 1 : iv - 1));
         if (d >= 0) { acc = a; break; }
@@ -231,13 +243,23 @@ const Theory = (() => {
   const LETTER = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
   const accOf = (a) => (/[#♯]/.test(a) ? 1 : /[b♭]/.test(a) ? -1 : 0);
   function parseChordName(name) {
-    const m = name.match(/^([A-G])([#♯b♭]?)([^/]*)(?:\/([A-G])([#♯b♭]?))?/);
+    const m = name.replace('6/9', '69').match(/^([A-G])([#♯b♭]?)([^/]*)(?:\/([A-G])([#♯b♭]?))?/);
     if (!m) return null;
     const root = mod(LETTER[m[1]] + accOf(m[2]));
     const bass = m[4] ? mod(LETTER[m[4]] + accOf(m[5])) : null;
-    const rest = m[3].replace(/[()]/g, '');
+    let rest = m[3].replace(/[()]/g, '');
     if (/^(m7b5|m7♭5|ø)/.test(rest)) return { root, quality: 'hdim', seventh: '', add: [], bass };
     if (/^5$/.test(rest)) return { root, quality: 'five', seventh: '', add: [], bass };
+
+    // altered tones (♭9 ♯9 ♯11 ♭13 ♭5 ♯5): pull them out before reading 7/9/11/13
+    const alt = [];
+    rest = rest.replace(/([b#♭♯])(5|9|11|13)/g, (_, a, n) => {
+      const flat = /[b♭]/.test(a);
+      alt.push({ 5: flat ? 6 : 8, 9: flat ? 1 : 3, 11: flat ? 4 : 6, 13: flat ? 8 : 9 }[n]);
+      return '';
+    });
+    let sixNine = false;
+    rest = rest.replace(/69/, () => { sixNine = true; return ''; });
 
     let quality = 'maj';
     if (/^(dim|°|o)/.test(rest)) quality = 'dim';
@@ -257,7 +279,10 @@ const Theory = (() => {
     const seventh = /maj(7|9|11|13)|M(7|9)|Δ/.test(core) ? 'maj7' : /7|9|11|13/.test(core) ? '7' : '';
     if (/9|11|13/.test(core)) add.push(2);  // 9/11/13 chords include the 9th
     if (/11/.test(core)) add.push(5);
+    if (/13/.test(core)) add.push(9);       // the 13th is the 6th an octave up
     if (/(^|[^1])6/.test(core)) add.push(9); // C6, Am6 (not the 3 of 13)
+    if (sixNine) add.push(9, 2);
+    add.push(...alt);
     return { root, quality, seventh, add: [...new Set(add)], bass };
   }
 

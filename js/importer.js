@@ -13,11 +13,18 @@ const Importer = (() => {
   const mod = Theory.mod;
   const KK_MAJ = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88];
   const KK_MIN = [6.33, 2.68, 3.52, 5.38, 2.60, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17];
+  // Chord templates for guessing, with a "complexity" cost (share of the bar's weight).
+  // Richer chords must earn their extra note (see bestChord).
   const QUALS = [
-    { quality: 'maj', seventh: '' }, { quality: 'min', seventh: '' },
-    { quality: 'maj', seventh: '7' }, { quality: 'min', seventh: '7' },
-    { quality: 'dim', seventh: '' },
+    { quality: 'maj', seventh: '', cost: 0 }, { quality: 'min', seventh: '', cost: 0 },
+    { quality: 'maj', seventh: '7', cost: 0.08 }, { quality: 'min', seventh: '7', cost: 0.08 },
+    { quality: 'maj', seventh: 'maj7', cost: 0.08 },
+    { quality: 'dim', seventh: '', cost: 0.12 },
+    { quality: 'sus2', seventh: '', cost: 0.1 }, { quality: 'sus4', seventh: '', cost: 0.1 },
+    { quality: 'maj', seventh: '', add: [2], cost: 0.1 }, { quality: 'min', seventh: '', add: [2], cost: 0.1 },
+    { quality: 'five', seventh: '', cost: 0.05 },
   ];
+  const TRIAD = { maj: [0, 4, 7], min: [0, 3, 7], dim: [0, 3, 6], five: [0, 7], sus2: [0, 7], sus4: [0, 7] };
   const LABEL = /^\s*(?:[eEBGDAbgda][#b]?)?\s*[|:]?/;
   const CHORD_TOKEN = /^[A-G][#b♯♭]?(maj|min|m|dim|aug|sus|add|M|°|ø|\+|-|Δ|[b#♯♭](?=\d)|\d|\(|\))*(\/[A-G][#b♯♭]?)?$/;
 
@@ -98,8 +105,11 @@ const Importer = (() => {
   }
 
   // ---------- analysis ----------
+  // Note weights of a group of events. hw = "harmonic" weight: notes sounding in a real
+  // chord voicing (3+ notes at once), as opposed to melody notes, pinches and arpeggios.
   function analyze(events) {
     const w = new Array(12).fill(0);
+    const hw = new Array(12).fill(0);
     const bass = new Array(12).fill(0);
     let total = 0;
     events.forEach((ev, k) => {
@@ -107,33 +117,53 @@ const Importer = (() => {
       for (const [s, f] of ev.notes) {
         const midi = Theory.OPEN_MIDI[s] + f;
         w[midi % 12] += 1;
+        if (ev.notes.length >= 3) hw[midi % 12] += 1;
         total += 1;
         if (low == null || midi < low) low = midi;
       }
       if (low != null) bass[low % 12] += k === 0 ? 1 : 0.5;
     });
-    return { w, bass, total };
+    return { w, hw, bass, total };
   }
 
   function bestChord(an, key) {
     if (!an.total) return null;
     const scale = key ? Theory.scalePcs(key) : null;
+    // an extra note (7th, 9th, sus note) is part of the harmony if it's inside a chord
+    // voicing, or makes up a real share of the bar, not one passing melody note
+    const harmonic = (pc) => an.hw[pc] > 0 || an.w[pc] >= 0.2 * an.total;
     let best = null;
     for (let r = 0; r < 12; r++) {
       for (const q of QUALS) {
-        const ch = { root: r, ...q };
-        const tones = Theory.chordIntervals(ch).map((i) => (r + i) % 12);
+        const ch = { root: r, quality: q.quality, seventh: q.seventh, add: q.add || [], bass: null };
+        const ivs = Theory.chordIntervals(ch);
+        const tones = ivs.map((i) => (r + i) % 12);
+        const extras = ivs.filter((i) => !(TRIAD[q.quality] || []).includes(i)).map((i) => (r + i) % 12);
+        if (!extras.every(harmonic)) continue;
         let s = 0;
         for (let pc = 0; pc < 12; pc++) s += tones.includes(pc) ? an.w[pc] : -0.6 * an.w[pc];
         s += 0.8 * an.bass[r];
         for (const t of tones) if (!an.w[t]) s -= 0.15 * an.total;
-        if (q.seventh) s -= 0.08 * an.total;
-        if (q.quality === 'dim') s -= 0.12 * an.total;
+        s -= q.cost * an.total;
         if (scale && tones.every((t) => scale.has(t))) s += 0.08 * an.total;
         if (!best || s > best.score) best = { chord: ch, score: s };
       }
     }
     return best;
+  }
+
+  // Bass note on the first beat that is a chord tone but not the root → slash chord (C/E).
+  function withBass(chord, events) {
+    if (!chord || !events.length) return chord;
+    let low = null;
+    for (const [s, f] of events[0].notes) {
+      const midi = Theory.OPEN_MIDI[s] + f;
+      if (s <= 2 && (low == null || midi < low)) low = midi;
+    }
+    if (low == null) return chord;
+    const pc = low % 12;
+    const tones = Theory.chordIntervals(chord).map((i) => (chord.root + i) % 12);
+    return pc !== chord.root && tones.includes(pc) ? { ...chord, bass: pc } : chord;
   }
 
   const same = (a, b) => Theory.sameChord(a, b);
@@ -147,14 +177,25 @@ const Importer = (() => {
       if (full && cut > 0) {
         const a1 = analyze(ev.slice(0, cut)), a2 = analyze(ev.slice(cut));
         const h1 = bestChord(a1, key), h2 = bestChord(a2, key);
+        // two plain chords (Am → F) beat one rich chord covering both (Fmaj7)
+        const plain = (c) => !c.seventh && !(c.add || []).length && ['maj', 'min', 'five'].includes(c.quality);
+        // …and a strummed sus/add chord resolving on the same root (Dsus4 → D) is worth
+        // showing, but not when the "extra" note is just a melody or bass note
+        const voiced = (c, an) => {
+          const triad = { maj: [0, 4, 7], min: [0, 3, 7] }[c.quality] || [];
+          return Theory.chordIntervals(c).filter((i) => !triad.includes(i)).every((i) => an.hw[(c.root + i) % 12] > 0);
+        };
+        const margin = !h1 || !h2 ? 0.25
+          : plain(h1.chord) && plain(h2.chord) && !plain(full.chord) ? 0
+          : h1.chord.root === h2.chord.root && voiced(h1.chord, a1) && voiced(h2.chord, a2) ? 0.05 : 0.25;
         if (h1 && h2 && a1.total >= 2 && a2.total >= 2 && !same(h1.chord, h2.chord) &&
-            h1.score + h2.score > full.score + 0.25 * (a1.total + a2.total)) {
-          segs.push({ bar: b, from: 0, to: cut, span: 1, chord: h1.chord });
-          segs.push({ bar: b, from: cut, to: ev.length, span: 1, chord: h2.chord });
+            h1.score + h2.score > full.score + margin * (a1.total + a2.total)) {
+          segs.push({ bar: b, from: 0, to: cut, span: 1, chord: withBass(h1.chord, ev.slice(0, cut)) });
+          segs.push({ bar: b, from: cut, to: ev.length, span: 1, chord: withBass(h2.chord, ev.slice(cut)) });
           return;
         }
       }
-      segs.push({ bar: b, from: 0, to: ev.length, span: 2, chord: full ? full.chord : null });
+      segs.push({ bar: b, from: 0, to: ev.length, span: 2, chord: full ? withBass(full.chord, ev) : null });
     });
     fillGaps(segs, key);
     return segs;
