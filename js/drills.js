@@ -10,26 +10,38 @@ const Drills = (() => {
   const voicing = (num, key) => Theory.chooseVoicing(Theory.chordFromNumeral(num, key), 0);
 
   // ---- Ear: which numeral? ----
+  // Plays the home chord (I) as reference, then a mystery chord. The home chord is never
+  // the mystery chord: hearing it twice sounds like a glitch, not a question.
+  let earTimers = [];
+  const clearEarTimers = () => { earTimers.forEach(clearTimeout); earTimers = []; };
+
   function earNew() {
+    clearEarTimers();
     const key = state.key;
+    const tonic = tonicNum(key);
     const fromTab = $('#earSongOnly').checked && state.chords.length;
     // plain triad numerals (Gadd9 → I), so every option can be played and named
     let opts = fromTab ? [...new Set(state.chords.map((c) => Theory.baseNumeral(c.chord, key)))] : Theory.diatonic(key);
-    if (!opts.includes(tonicNum(key))) opts = [tonicNum(key), ...opts];
+    opts = opts.filter((n) => n !== tonic);
+    if (opts.length < 2) opts = Theory.diatonic(key).filter((n) => n !== tonic); // one-chord tab
     let ans;
     do { ans = pick(opts); } while (opts.length > 1 && ans === ear.answer);
     Object.assign(ear, { answer: ans, options: opts, locked: false });
-    $('#earFeedback').textContent = '';
     renderEarOptions();
     earPlay();
   }
 
   function earPlay() {
     if (!ear.answer) return earNew();
+    clearEarTimers();
     const ctx = AudioEngine.ensure();
     const t = ctx.currentTime + 0.05;
     AudioEngine.strum(voicing(tonicNum(state.key), state.key).frets, t, 0.05);
     AudioEngine.strum(voicing(ear.answer, state.key).frets, t + 1.4, 0.05);
+    if (!ear.locked) {
+      $('#earFeedback').textContent = '♪ home chord…';
+      earTimers.push(setTimeout(() => { $('#earFeedback').textContent = '♪ mystery chord? Which numeral is it?'; }, 1450));
+    }
   }
 
   function renderEarOptions() {
@@ -43,6 +55,7 @@ const Drills = (() => {
       b.onclick = () => {
         if (ear.locked) return;
         ear.locked = true;
+        clearEarTimers();
         ear.total++;
         const right = num === ear.answer;
         if (right) ear.score++;
@@ -55,7 +68,7 @@ const Drills = (() => {
           ? `Yes! ${ear.answer} = ${Theory.chordName(ansCh, state.key)}.`
           : `It was ${ear.answer} (${Theory.chordName(ansCh, state.key)}). Hit ↻ to hear it again.`;
         $('#earScore').textContent = `${ear.score} / ${ear.total}`;
-        if (right) setTimeout(earNew, 1300);
+        if (right) earTimers.push(setTimeout(earNew, 1300));
       };
       el.appendChild(b);
     });
@@ -151,6 +164,7 @@ const Drills = (() => {
       ? `${Theory.keyName(state.key)} (from “${state.song.title}”)`
       : `${Theory.keyName(state.key)} (import a tab to drill in its key)`;
     $('#earSongOnlyWrap').classList.toggle('hidden', !state.song);
+    clearEarTimers();
     ear.answer = null;
     $('#earOptions').innerHTML = '';
     $('#earFeedback').textContent = 'Press “New question”, then listen.';
@@ -169,5 +183,5 @@ const Drills = (() => {
     $('#numSkip').onclick = numNew;
   }
 
-  return { init, enter };
+  return { init, enter, leave: clearEarTimers };
 })();

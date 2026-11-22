@@ -394,7 +394,7 @@ function refreshSongSelect() {
 function showView(name) {
   document.querySelectorAll('.tabs button').forEach((x) => x.classList.toggle('active', x.dataset.view === name));
   document.querySelectorAll('.view').forEach((v) => v.classList.toggle('hidden', v.id !== 'view-' + name));
-  if (name === 'drills') Drills.enter();
+  if (name === 'drills') Drills.enter(); else Drills.leave();
 }
 
 function openImport(withExample) {
